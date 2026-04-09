@@ -49,6 +49,8 @@ class DualScopeFusionBlock(nn.Module):
         self.se = SEBlock(input_dim, reduction_ratio)
 
     def forward(self, f_local, f_global):
+        print(f"DEBUG: f_local dim={f_local.dim()} shape={f_local.shape}")
+        print(f"DEBUG: f_global dim={f_global.dim()} shape={f_global.shape}")
         f_cat = torch.cat([f_local, f_global], dim=1)  # [B, 2048]
         f_fused = self.se(f_cat)                         # [B, 2048]
         return f_fused
@@ -116,8 +118,10 @@ class DermaViT(nn.Module):
             f_local = eff_features  # [B, 1280] already pooled
 
         # Branch 2: Swin-T
-        f_global = self.swin(x)  # [B, 768]
-        if f_global.dim() == 3:
+        f_global = self.swin(x)  # [B, 7, 7, 768] or [B, N, 768]
+        if f_global.dim() == 4:
+            f_global = f_global.mean(dim=(1, 2))  # [B, 768]
+        elif f_global.dim() == 3:
             f_global = f_global.mean(dim=1)  # [B, 768]
 
         # Fusion

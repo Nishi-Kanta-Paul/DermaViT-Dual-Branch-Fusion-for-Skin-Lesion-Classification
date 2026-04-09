@@ -17,6 +17,13 @@ from config import (
     ONEHOT_COLUMNS, IMAGE_DIR, GROUNDTRUTH_CSV,
     NUM_CLASSES
 )
+
+# Optional CPU setting fallback
+try:
+    from config import DEBUG_SUBSET
+except ImportError:
+    DEBUG_SUBSET = False
+
 from utils import get_class_weights
 
 
@@ -116,24 +123,30 @@ def get_dataloaders(groundtruth_csv, image_dir, batch_size, seed):
     # Load metadata
     df = pd.read_csv(groundtruth_csv)
 
+    if DEBUG_SUBSET:
+        print("\n  [CPU DEBUG MODE] Subsetting dataset to 140 images to save memory/time.")
+        df = df.head(140)
+
     # Convert one-hot to integer labels
     image_ids = df['image'].values.tolist()
     onehot_values = df[ONEHOT_COLUMNS].values
     labels = np.argmax(onehot_values, axis=1).tolist()
 
+    stratify_target = None if DEBUG_SUBSET else labels
     # Stratified split: 80% train, 20% temp
     train_ids, temp_ids, train_labels, temp_labels = train_test_split(
         image_ids, labels,
         test_size=0.2,
-        stratify=labels,
+        stratify=stratify_target,
         random_state=seed
     )
 
     # Stratified split: 50% val, 50% test from temp (→ 10% each overall)
+    stratify_temp = None if DEBUG_SUBSET else temp_labels
     val_ids, test_ids, val_labels, test_labels = train_test_split(
         temp_ids, temp_labels,
         test_size=0.5,
-        stratify=temp_labels,
+        stratify=stratify_temp,
         random_state=seed
     )
 
