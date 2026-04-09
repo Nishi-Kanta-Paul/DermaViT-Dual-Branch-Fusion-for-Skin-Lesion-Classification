@@ -26,8 +26,8 @@ def main():
     start_time = time.time()
 
     print("╔══════════════════════════════════════════════════╗")
-    print("║       DermaViT — Skin Lesion Classification     ║")
-    print("║   Dual-Branch Fusion: EfficientNet-B0 + Swin-T  ║")
+    print("║       DermaViT — Skin Lesion Classification      ║")
+    print("║   Dual-Branch Fusion: EfficientNet-B0 + Swin-T   ║")
     print("╚══════════════════════════════════════════════════╝")
 
     # ── Step 1: Set seed for reproducibility ──
