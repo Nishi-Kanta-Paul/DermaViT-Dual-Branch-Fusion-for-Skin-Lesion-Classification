@@ -1,0 +1,24 @@
+# Environment
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# IDEs
+.idea/
+.vscode/
+
+# Dataset files
+HAM10000/
+
+# Generated Outputs and Checkpoints
+outputs/
+Baselines/outputs/
+DermaViT/outputs/
+*.pth
+*.pt
+results/
+saliency_maps/
+*.png
+*.txt
