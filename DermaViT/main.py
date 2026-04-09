@@ -25,10 +25,10 @@ def main():
     """Run the complete DermaViT pipeline."""
     start_time = time.time()
 
-    print("╔══════════════════════════════════════════════════╗")
-    print("║       DermaViT — Skin Lesion Classification      ║")
-    print("║   Dual-Branch Fusion: EfficientNet-B0 + Swin-T   ║")
-    print("╚══════════════════════════════════════════════════╝")
+    print("=" * 50)
+    print("      DermaViT — Skin Lesion Classification")
+    print("  Dual-Branch Fusion: EfficientNet-B0 + Swin-T")
+    print("=" * 50)
 
     # ── Step 1: Set seed for reproducibility ──
     print("\n[Step 1/7] Setting random seed...")
@@ -87,22 +87,21 @@ def main():
     minutes = int((elapsed % 3600) // 60)
 
     print("\n")
-    print("╔══════════════════════════════════════════════════╗")
-    print("║       DermaViT — Final Results                  ║")
-    print("╠══════════════════════════════════════════════════╣")
+    print("=" * 50)
+    print("       DermaViT — Final Results")
+    print("-" * 50)
     acc_s = f"{summary['accuracy']:.1f}"
     prec_s = f"{summary['precision']:.1f}"
     rec_s = f"{summary['recall']:.1f}"
-    f1_s = f"{summary['f1_score']:.1f}"
+    f1_s = f"{summary['f1']:.1f}"
     auc_s = f"{summary['auc']:.1f}"
-    time_s = f"{hours}h {minutes}m"
-    print(f"║  Accuracy:  {acc_s}%{' '*(36-len(acc_s))}║")
-    print(f"║  Precision: {prec_s}%{' '*(36-len(prec_s))}║")
-    print(f"║  Recall:    {rec_s}%{' '*(36-len(rec_s))}║")
-    print(f"║  F1-score:  {f1_s}%{' '*(36-len(f1_s))}║")
-    print(f"║  AUC:       {auc_s}%{' '*(36-len(auc_s))}║")
-    print(f"║  Time:      {time_s}{' '*(38-len(time_s))}║")
-    print("╚══════════════════════════════════════════════════╝")
+
+    print(f"  Accuracy (Test) : {acc_s:>5}%")
+    print(f"  Precision       : {prec_s:>5}%")
+    print(f"  Recall          : {rec_s:>5}%")
+    print(f"  F1-Score        : {f1_s:>5}%")
+    print(f"  AUC (Macro)     : {auc_s:>5}%")
+    print("=" * 50)
 
     print("\n✓ Pipeline complete! All outputs saved to:")
     print(f"  • Best model:     {BEST_MODEL_PATH}")
