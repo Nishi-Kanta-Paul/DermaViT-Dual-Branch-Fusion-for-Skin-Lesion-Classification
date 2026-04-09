@@ -40,7 +40,7 @@ def main():
     print(f"\n[Step 2/7] Device: {device}")
     if torch.cuda.is_available():
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
-        mem_gb = torch.cuda.get_device_properties(0).total_mem / 1e9
+        mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         print(f"  VRAM: {mem_gb:.1f} GB")
 
     # ── Step 3: Create output directories ──
