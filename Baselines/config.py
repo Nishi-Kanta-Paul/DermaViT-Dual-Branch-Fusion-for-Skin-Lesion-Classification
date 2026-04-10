@@ -32,10 +32,12 @@ CLASS_NAMES = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 ONEHOT_COLUMNS = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 
 # ────────────────── Paths ──────────────────
-DATA_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "HAM10000"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DEFAULT_DATA_ROOT = os.path.join(PROJECT_ROOT, "HAM10000")
+DATA_ROOT = os.path.abspath(os.getenv("DERMAVIT_DATA_ROOT", DEFAULT_DATA_ROOT))
 IMAGE_DIR = os.path.join(DATA_ROOT, "images")
 GROUNDTRUTH_CSV = os.path.join(DATA_ROOT, "GroundTruth.csv")
 
-OUTPUT_DIR = "outputs"
+OUTPUT_DIR = os.path.abspath(os.getenv("DERMAVIT_OUTPUT_DIR", os.path.join(PROJECT_ROOT, "outputs")))
 
 SEED = 42

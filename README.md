@@ -59,6 +59,48 @@ Place your downloaded dataset in the root folder such that:
 
 ## 🏃‍♂️ Running the Models
 
+## ⚡ Google Colab Fast Iteration (No Re-Upload of Dataset)
+
+If you make frequent code changes, do not zip/upload the full workspace every time.
+
+### One-Time Setup (Drive)
+1. Upload dataset once to Drive, for example:
+    - `/content/drive/MyDrive/DermaViT_Research/HAM10000/`
+2. Keep outputs persistent in Drive as well, for example:
+    - `/content/drive/MyDrive/DermaViT_Research/outputs/`
+
+### Recommended Code Sync Strategy
+Use Git for code sync (small changes = only `git pull` in Colab):
+
+```bash
+from google.colab import drive
+drive.mount('/content/drive')
+
+%cd /content
+!git clone <your-repo-url> DermaViT_Workspace || true
+%cd /content/DermaViT_Workspace
+!git pull
+```
+
+### Run with Persistent Dataset + Output Paths
+This project now supports environment-variable based paths:
+- `DERMAVIT_DATA_ROOT`
+- `DERMAVIT_OUTPUT_DIR`
+
+```bash
+%cd /content/DermaViT_Workspace
+!pip install -r DermaViT/requirements.txt
+
+import os
+os.environ["DERMAVIT_DATA_ROOT"] = "/content/drive/MyDrive/DermaViT_Research/HAM10000"
+os.environ["DERMAVIT_OUTPUT_DIR"] = "/content/drive/MyDrive/DermaViT_Research/outputs"
+
+!chmod +x run_all.sh
+!./run_all.sh
+```
+
+Now dataset upload is one-time only. For later code edits, just push locally and `git pull` in Colab.
+
 ### 1. Train and Evaluate the Proposed DermaViT
 Run the complete pipeline—this will train the model, evaluate test metrics (Acc, Precision, Recall, F1, AUC), and generate both plots and 4-panel explainability saliency maps.
 

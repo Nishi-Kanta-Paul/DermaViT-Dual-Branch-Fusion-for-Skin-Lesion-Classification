@@ -40,11 +40,13 @@ LABEL_MAP = {'MEL': 0, 'NV': 1, 'BCC': 2, 'AKIEC': 3, 'BKL': 4, 'DF': 5, 'VASC':
 ONEHOT_COLUMNS = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 
 # ────────────────── Paths ──────────────────
-DATA_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "HAM10000"))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DEFAULT_DATA_ROOT = os.path.join(PROJECT_ROOT, "HAM10000")
+DATA_ROOT = os.path.abspath(os.getenv("DERMAVIT_DATA_ROOT", DEFAULT_DATA_ROOT))
 IMAGE_DIR = os.path.join(DATA_ROOT, "images")
 GROUNDTRUTH_CSV = os.path.join(DATA_ROOT, "GroundTruth.csv")
 
-OUTPUT_DIR = "outputs"
+OUTPUT_DIR = os.path.abspath(os.getenv("DERMAVIT_OUTPUT_DIR", os.path.join(PROJECT_ROOT, "outputs")))
 RESULTS_DIR = os.path.join(OUTPUT_DIR, "results")
 SALIENCY_DIR = os.path.join(OUTPUT_DIR, "saliency_maps")
 BEST_MODEL_PATH = os.path.join(OUTPUT_DIR, "best_model.pth")

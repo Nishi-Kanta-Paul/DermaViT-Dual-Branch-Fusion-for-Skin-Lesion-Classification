@@ -4,7 +4,6 @@ Reads summary_metrics.txt from DermaViT and all Baselines and generates a Markdo
 equivalent to Table I in the research paper specification.
 """
 import os
-import glob
 
 def parse_summary_file(filepath):
     metrics = {}
@@ -25,14 +24,15 @@ def parse_summary_file(filepath):
 
 def main():
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_root = os.path.abspath(os.getenv("DERMAVIT_OUTPUT_DIR", os.path.join(root_dir, "outputs")))
     
     # Define models to look for, order matches Table I format
     models = [
-        {"name": "ResNet-50", "path": os.path.join(root_dir, "Baselines", "outputs", "ResNet-50", "results", "summary_metrics.txt")},
-        {"name": "EfficientNet-B2", "path": os.path.join(root_dir, "Baselines", "outputs", "EfficientNet-B2", "results", "summary_metrics.txt")},
-        {"name": "ViT-B/16", "path": os.path.join(root_dir, "Baselines", "outputs", "ViT-B16", "results", "summary_metrics.txt")},
-        {"name": "Swin-T", "path": os.path.join(root_dir, "Baselines", "outputs", "Swin-T", "results", "summary_metrics.txt")},
-        {"name": "DermaViT", "path": os.path.join(root_dir, "DermaViT", "outputs", "results", "summary_metrics.txt")}
+        {"name": "ResNet-50", "path": os.path.join(output_root, "ResNet-50", "results", "summary_metrics.txt")},
+        {"name": "EfficientNet-B2", "path": os.path.join(output_root, "EfficientNet-B2", "results", "summary_metrics.txt")},
+        {"name": "ViT-B/16", "path": os.path.join(output_root, "ViT-B16", "results", "summary_metrics.txt")},
+        {"name": "Swin-T", "path": os.path.join(output_root, "Swin-T", "results", "summary_metrics.txt")},
+        {"name": "DermaViT", "path": os.path.join(output_root, "results", "summary_metrics.txt")}
     ]
     
     print("\nTABLE I")
