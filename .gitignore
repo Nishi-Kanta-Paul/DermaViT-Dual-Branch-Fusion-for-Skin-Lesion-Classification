@@ -21,4 +21,3 @@ DermaViT/outputs/
 results/
 saliency_maps/
 *.png
-*.txt
