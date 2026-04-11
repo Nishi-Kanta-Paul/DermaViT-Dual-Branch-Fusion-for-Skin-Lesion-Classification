@@ -36,7 +36,7 @@ def main():
     ]
     
     print("\nTABLE I")
-    print("PERFORMANCE COMPARISON ON HAM10000 TEST SET")
+    print("PERFORMANCE COMPARISON ON TEST SET")
     print("-" * 65)
     print(f"| {'Model':<18} | {'Acc(%)':<8} | {'Prec.':<8} | {'Rec.':<8} | {'F1':<8} | {'AUC':<8} |")
     print("-" * 65)

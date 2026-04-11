@@ -17,26 +17,43 @@ DermaViT leverages a **dual-branch fusion architecture** combining the local fea
 ## 📂 Project Structure
 
 ```text
-DermaViT_Workspace/
-├── HAM10000/                # Dataset directory (Images & GroundTruth.csv)
-├── DermaViT/                # Our proposed architecture & main implementation
-│   ├── config.py            # Core hyperparameters
-│   ├── dataset.py           # Dataloaders with stratified splits & augmentation
-│   ├── model.py             # Dual-branch Fusion Model (EfficientNet + Swin)
-│   ├── train.py             # Optimized training loop (Cosine Annealing + AMP)
-│   ├── evaluate.py          # Metric calculations & ROC curve generation
-│   ├── explainability.py    # Grad-CAM & Attention joint saliency mapping
-│   ├── main.py              # Single-file pipeline orchestration
-│   └── requirements.txt     # Python dependencies
-└── Baselines/               # Standard architectures for fair comparison
-    ├── config.py            # Comparative hyperparameters
-    ├── dataset.py           # Shared data pipeline
-    ├── utils.py             # Shared utilities
-    ├── train_resnet50.py
-    ├── train_efficientnet_b2.py
-    ├── train_vit_b16.py
-    ├── train_swin_t.py
-    └── compare_results.py   # Aggregates evaluation logs into comparison tables
+DermaViT/
+├── README.md
+├── requirements.txt
+├── .gitignore
+├── baselines/               # Baseline model training and comparison scripts
+│   ├── compare_results.py
+│   ├── config.py
+│   ├── dataset.py
+│   ├── train_efficientnet_b2.py
+│   ├── train_resnet50.py
+│   ├── train_swin_t.py
+│   ├── train_vit_b16.py
+│   └── utils.py
+├── data/                    # Dataset metadata, images, and segmentation masks
+│   ├── metadata.csv
+│   ├── images/
+│   └── masks/
+├── experiments/             # Per-model artifacts (checkpoints/logs/results)
+│   ├── derma_vit/
+│   ├── efficientnet_b2/
+│   ├── resnet50/
+│   ├── swin_t/
+│   └── vit_b16/
+├── notebooks/
+├── outputs/
+├── scripts/
+│   └── train.sh
+└── src/                     # Main DermaViT training/evaluation/inference code
+    ├── config.py
+    ├── dataset.py
+    ├── evaluate.py
+    ├── explainability.py
+    ├── inference.py
+    ├── main.py
+    ├── model.py
+    ├── train.py
+    └── utils.py
 ```
 
 ---
@@ -47,13 +64,20 @@ DermaViT_Workspace/
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r DermaViT/requirements.txt
+pip install -r requirements.txt
 ```
 
-**2. Prepare the HAM10000 Dataset:**
-Place your downloaded dataset in the root folder such that:
-- `HAM10000/GroundTruth.csv` exists (One-hot encoded label columns).
-- `HAM10000/images/` contains all `ISIC_XXXXXXX.jpg` image files.
+**2. Prepare the dataset in `data/`:**
+Use the current repository layout and ensure the following paths exist:
+- `data/metadata.csv` (metadata/labels file)
+- `data/images/` (all dermoscopy images)
+- `data/masks/` (segmentation masks, if used)
+
+**3. Quick sanity check (optional):**
+```bash
+ls data
+```
+You should see at least: `images`, `masks`, and `metadata.csv`.
 
 ---
 
@@ -65,7 +89,7 @@ If you make frequent code changes, do not zip/upload the full workspace every ti
 
 ### One-Time Setup (Drive)
 1. Upload dataset once to Drive, for example:
-    - `/content/drive/MyDrive/DermaViT_Research/HAM10000/`
+    - `/content/drive/MyDrive/DermaViT_Research/data/`
 2. Keep outputs persistent in Drive as well, for example:
     - `/content/drive/MyDrive/DermaViT_Research/outputs/`
 
@@ -92,7 +116,7 @@ This project now supports environment-variable based paths:
 !pip install -r DermaViT/requirements.txt
 
 import os
-os.environ["DERMAVIT_DATA_ROOT"] = "/content/drive/MyDrive/DermaViT_Research/HAM10000"
+os.environ["DERMAVIT_DATA_ROOT"] = "/content/drive/MyDrive/DermaViT_Research/data"
 os.environ["DERMAVIT_OUTPUT_DIR"] = "/content/drive/MyDrive/DermaViT_Research/outputs"
 
 !chmod +x run_all.sh

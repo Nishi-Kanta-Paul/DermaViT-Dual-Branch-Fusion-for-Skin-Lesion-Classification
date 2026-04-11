@@ -1,23 +1,27 @@
-# Environment
+# Python environments and cache
 venv/
 .venv/
 env/
 __pycache__/
-*.pyc
+*.py[cod]
 
-# IDEs
+# IDE and notebook cache
 .idea/
 .vscode/
+.ipynb_checkpoints/
 
 # Dataset files
-HAM10000/
+data/
 
-# Generated Outputs and Checkpoints
+# Generated outputs and training artifacts
 outputs/
-Baselines/outputs/
-DermaViT/outputs/
-*.pth
-*.pt
+baselines/outputs/
+experiments/**/checkpoints/
+experiments/**/logs/
+experiments/**/results/
 results/
 saliency_maps/
-*.png
+checkpoints/
+*.pth
+*.pt
+*.ckpt

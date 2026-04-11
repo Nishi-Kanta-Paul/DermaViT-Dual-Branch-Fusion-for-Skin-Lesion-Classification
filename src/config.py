@@ -36,15 +36,15 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 CLASS_NAMES = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 LABEL_MAP = {'MEL': 0, 'NV': 1, 'BCC': 2, 'AKIEC': 3, 'BKL': 4, 'DF': 5, 'VASC': 6}
 
-# Column order in GroundTruth.csv (one-hot encoded)
+# Column order in metadata.csv (one-hot encoded)
 ONEHOT_COLUMNS = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
 
 # ────────────────── Paths ──────────────────
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DEFAULT_DATA_ROOT = os.path.join(PROJECT_ROOT, "HAM10000")
+DEFAULT_DATA_ROOT = os.path.join(PROJECT_ROOT, "data")
 DATA_ROOT = os.path.abspath(os.getenv("DERMAVIT_DATA_ROOT", DEFAULT_DATA_ROOT))
 IMAGE_DIR = os.path.join(DATA_ROOT, "images")
-GROUNDTRUTH_CSV = os.path.join(DATA_ROOT, "GroundTruth.csv")
+GROUNDTRUTH_CSV = os.path.join(DATA_ROOT, "metadata.csv")
 
 OUTPUT_DIR = os.path.abspath(os.getenv("DERMAVIT_OUTPUT_DIR", os.path.join(PROJECT_ROOT, "outputs")))
 RESULTS_DIR = os.path.join(OUTPUT_DIR, "results")

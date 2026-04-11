@@ -1,6 +1,6 @@
 """
 DermaViT Dataset
-HAM10000 dataset loading with CLAHE preprocessing, albumentations transforms,
+Skin lesion dataset loading with CLAHE preprocessing, albumentations transforms,
 and stratified train/val/test split.
 """
 import os
@@ -27,11 +27,11 @@ except ImportError:
 from utils import get_class_weights
 
 
-class HAM10000Dataset(Dataset):
+class SkinLesionDataset(Dataset):
     """
-    HAM10000 Skin Lesion Dataset.
+    Skin lesion dataset.
     
-    Reads GroundTruth.csv (one-hot encoded), converts to integer labels,
+    Reads metadata.csv (one-hot encoded), converts to integer labels,
     applies CLAHE per-channel, and then albumentations transforms.
     """
 
@@ -164,13 +164,13 @@ def get_dataloaders(groundtruth_csv, image_dir, batch_size, seed):
     print(f"  Class weights: {class_weights.tolist()}")
 
     # Create datasets
-    train_dataset = HAM10000Dataset(
+    train_dataset = SkinLesionDataset(
         train_ids, train_labels, image_dir, transform=get_transforms('train')
     )
-    val_dataset = HAM10000Dataset(
+    val_dataset = SkinLesionDataset(
         val_ids, val_labels, image_dir, transform=get_transforms('val')
     )
-    test_dataset = HAM10000Dataset(
+    test_dataset = SkinLesionDataset(
         test_ids, test_labels, image_dir, transform=get_transforms('test')
     )
 
