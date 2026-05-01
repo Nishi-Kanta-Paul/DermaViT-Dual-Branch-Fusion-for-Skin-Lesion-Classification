@@ -34,8 +34,10 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
     pbar = tqdm(loader, desc="  Train", leave=False)
-    for images, labels in pbar:
-        images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+    for batch in pbar:  # CHANGED
+        images, metadata, labels = batch  # CHANGED
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         optimizer.zero_grad()
         with autocast():
             logits = model(images)
@@ -55,8 +57,10 @@ def validate(model, loader, criterion, device):
     running_loss, correct, total = 0.0, 0, 0
     all_preds, all_labels = [], []
     with torch.no_grad():
-        for images, labels in tqdm(loader, desc="  Val  ", leave=False):
-            images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+        for batch in tqdm(loader, desc="  Val  ", leave=False):  # CHANGED
+            images, metadata, labels = batch  # CHANGED
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             with autocast():
                 logits = model(images)
                 loss = criterion(logits, labels)
@@ -76,7 +80,8 @@ def get_evaluate_script_logic(model, test_loader, device):
     model.eval()
     all_preds, all_labels, all_probs = [], [], []
     with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="  Test"):
+        for batch in tqdm(test_loader, desc="  Test"):  # CHANGED
+            images, metadata, labels = batch  # CHANGED
             images = images.to(device, non_blocking=True)
             logits = model(images)
             probs = torch.softmax(logits.float(), dim=1)

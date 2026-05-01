@@ -16,7 +16,9 @@ from config import (
     BATCH_SIZE, NUM_EPOCHS, WEIGHT_DECAY,
     GROUNDTRUTH_CSV, IMAGE_DIR, SEED,
     OUTPUT_DIR, RESULTS_DIR, BEST_MODEL_PATH,
-    EARLY_STOPPING_PATIENCE, NUM_CLASSES
+    EARLY_STOPPING_PATIENCE, NUM_CLASSES,
+    ABLATION_MODE, SE_REDUCTION_RATIOS, DROPOUT_RATES,  # CHANGED
+    LR_CNN_OPTIONS, LR_SWIN_OPTIONS, ABLATION_EPOCHS, ABLATION_PATIENCE  # CHANGED
 )
 from utils import (
     set_seed, save_checkpoint, plot_training_curves
@@ -38,14 +40,16 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
     total = 0
 
     pbar = tqdm(loader, desc="  Train", leave=False)
-    for images, labels in pbar:
+    for batch in pbar:  # CHANGED
+        images, metadata, labels = batch  # CHANGED: unpack metadata
         images = images.to(device, non_blocking=True)
+        metadata = metadata.to(device, non_blocking=True)  # CHANGED
         labels = labels.to(device, non_blocking=True)
 
         optimizer.zero_grad()
 
         with autocast():
-            logits = model(images)
+            logits = model(images, metadata)  # CHANGED: pass metadata
             loss = criterion(logits, labels)
 
         scaler.scale(loss).backward()
@@ -79,12 +83,14 @@ def validate(model, loader, criterion, device):
     all_labels = []
 
     with torch.no_grad():
-        for images, labels in tqdm(loader, desc="  Val  ", leave=False):
+        for batch in tqdm(loader, desc="  Val  ", leave=False):  # CHANGED
+            images, metadata, labels = batch  # CHANGED: unpack metadata
             images = images.to(device, non_blocking=True)
+            metadata = metadata.to(device, non_blocking=True)  # CHANGED
             labels = labels.to(device, non_blocking=True)
 
             with autocast():
-                logits = model(images)
+                logits = model(images, metadata)  # CHANGED: pass metadata
                 loss = criterion(logits, labels)
 
             running_loss += loss.item() * images.size(0)
@@ -100,6 +106,118 @@ def validate(model, loader, criterion, device):
     macro_f1 = f1_score(all_labels, all_preds, average='macro')
 
     return avg_loss, accuracy, macro_f1
+
+
+def run_ablation_study(train_loader, val_loader, class_weights, device):  # CHANGED: new function
+    """
+    Run hyperparameter ablation study with grid search.
+    
+    Returns:
+        best_config dict
+    """
+    import itertools
+    import csv
+    
+    print("\n" + "=" * 70)
+    print("DermaViT — Ablation Study")
+    print("=" * 70)
+    
+    # Grid search combinations
+    configs = list(itertools.product(
+        SE_REDUCTION_RATIOS, DROPOUT_RATES, LR_CNN_OPTIONS, LR_SWIN_OPTIONS
+    ))
+    
+    print(f"\n  Total configurations to test: {len(configs)}")
+    print(f"  Epochs per config: {ABLATION_EPOCHS}")
+    print(f"  Early stopping patience: {ABLATION_PATIENCE}\n")
+    
+    results = []
+    best_val_f1 = 0.0
+    best_config = None
+    
+    for idx, (se_ratio, dropout, lr_cnn, lr_swin) in enumerate(configs, 1):
+        print(f"\n[Config {idx}/{len(configs)}] SE={se_ratio}, Dropout={dropout}, LR_CNN={lr_cnn}, LR_SWIN={lr_swin}")
+        
+        # Build model with current config
+        model = DermaViT(dropout=dropout, se_reduction=se_ratio).to(device)
+        
+        # Optimizer with differential LRs
+        optimizer = torch.optim.AdamW([
+            {'params': model.efficientnet.parameters(), 'lr': lr_cnn},
+            {'params': model.swin.parameters(), 'lr': lr_swin},
+            {'params': list(model.fusion.parameters()) + list(model.classifier.parameters()), 'lr': lr_cnn}
+        ], weight_decay=WEIGHT_DECAY)
+        
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=10, T_mult=2, eta_min=1e-6
+        )
+        
+        criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+        scaler = GradScaler()
+        
+        # Train for ablation epochs
+        best_config_val_f1 = 0.0
+        patience_counter = 0
+        
+        for epoch in range(1, ABLATION_EPOCHS + 1):
+            train_loss, train_acc = train_one_epoch(
+                model, train_loader, criterion, optimizer, scaler, device
+            )
+            val_loss, val_acc, val_f1 = validate(
+                model, val_loader, criterion, device
+            )
+            scheduler.step()
+            
+            if val_f1 > best_config_val_f1:
+                best_config_val_f1 = val_f1
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= ABLATION_PATIENCE:
+                    print(f"    Early stop at epoch {epoch}")
+                    break
+        
+        # Record results
+        results.append({
+            'se_ratio': se_ratio,
+            'dropout': dropout,
+            'lr_cnn': lr_cnn,
+            'lr_swin': lr_swin,
+            'val_f1': best_config_val_f1,
+            'val_acc': val_acc
+        })
+        
+        print(f"    Best Val F1: {best_config_val_f1:.4f}, Val Acc: {val_acc:.1f}%")
+        
+        if best_config_val_f1 > best_val_f1:
+            best_val_f1 = best_config_val_f1
+            best_config = results[-1].copy()
+        
+        # Clear GPU cache
+        del model, optimizer, scheduler, criterion, scaler
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    # Save results to CSV
+    ablation_csv_path = os.path.join(OUTPUT_DIR, "ablation_results.csv")
+    with open(ablation_csv_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['se_ratio', 'dropout', 'lr_cnn', 'lr_swin', 'val_f1', 'val_acc'])
+        writer.writeheader()
+        writer.writerows(results)
+    
+    print("\n" + "=" * 70)
+    print("Ablation Study Complete")
+    print("=" * 70)
+    print(f"\nBest Configuration:")
+    print(f"  SE Reduction Ratio: {best_config['se_ratio']}")
+    print(f"  Dropout: {best_config['dropout']}")
+    print(f"  LR CNN: {best_config['lr_cnn']}")
+    print(f"  LR Swin: {best_config['lr_swin']}")
+    print(f"  Val F1: {best_config['val_f1']:.4f}")
+    print(f"  Val Acc: {best_config['val_acc']:.1f}%")
+    print(f"\nResults saved to: {ablation_csv_path}")
+    
+    return best_config
 
 
 def train(config=None):

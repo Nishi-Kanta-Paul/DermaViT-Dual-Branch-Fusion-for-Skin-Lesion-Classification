@@ -13,6 +13,9 @@ if not HAS_GPU:
 
 DEBUG_SUBSET = not HAS_GPU  # If True, subset dataset to 140 images
 
+# CHANGED: Ablation study mode
+ABLATION_MODE = False  # Set to True to run hyperparameter ablation study
+
 # ────────────────── Image & Training ──────────────────
 IMG_SIZE = 224
 BATCH_SIZE = 32 if HAS_GPU else 2
@@ -27,6 +30,14 @@ DROPOUT = 0.4
 SE_REDUCTION_RATIO = 16
 LAMBDA_SALIENCY = 0.5  
 EARLY_STOPPING_PATIENCE = 15 if HAS_GPU else 1
+
+# CHANGED: Ablation search spaces
+SE_REDUCTION_RATIOS = [8, 16, 32]
+DROPOUT_RATES = [0.3, 0.4, 0.5]
+LR_CNN_OPTIONS = [1e-4, 5e-5]
+LR_SWIN_OPTIONS = [5e-5, 1e-5]
+ABLATION_EPOCHS = 20 if HAS_GPU else 1
+ABLATION_PATIENCE = 5 if HAS_GPU else 1
 
 # ────────────────── Normalization ──────────────────
 IMAGENET_MEAN = [0.485, 0.456, 0.406]

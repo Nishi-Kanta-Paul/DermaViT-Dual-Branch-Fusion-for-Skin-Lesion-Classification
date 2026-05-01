@@ -25,3 +25,9 @@ checkpoints/
 *.pth
 *.pt
 *.ckpt
+
+
+# Documentation (keep local only, not in git)
+context-docs/
+VERIFICATION_REPORT.txt
+

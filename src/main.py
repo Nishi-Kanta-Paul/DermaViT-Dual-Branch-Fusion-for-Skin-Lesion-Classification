@@ -11,12 +11,12 @@ from config import (
     SEED, BATCH_SIZE, NUM_EPOCHS, NUM_CLASSES,
     GROUNDTRUTH_CSV, IMAGE_DIR, OUTPUT_DIR,
     RESULTS_DIR, SALIENCY_DIR, BEST_MODEL_PATH,
-    CLASS_NAMES
+    CLASS_NAMES, ABLATION_MODE, DATA_ROOT
 )
 from utils import set_seed, load_checkpoint
 from dataset import get_dataloaders
 from model import DermaViT
-from train import train
+from train import train, run_ablation_study
 from evaluate import evaluate
 from explainability import generate_saliency_maps
 
@@ -64,7 +64,19 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # ── Step 5: Train ──
+    # ── Step 5: Check ablation mode or train ──
+    if ABLATION_MODE:
+        print("\n[Step 5/7] Running ablation study...")
+        print("  Loading data for ablation...")
+        train_loader, val_loader, test_loader, class_weights = get_dataloaders(
+            GROUNDTRUTH_CSV, IMAGE_DIR, BATCH_SIZE, SEED
+        )
+        best_config = run_ablation_study(train_loader, val_loader, class_weights, device)
+        print("\n" + "=" * 50)
+        print("Ablation study complete. Exiting.")
+        print("=" * 50)
+        return
+    
     print("\n[Step 5/7] Starting training...")
     model, test_loader = train()
 
@@ -75,7 +87,8 @@ def main():
 
     # ── Step 6: Evaluate on test set ──
     print("\n[Step 6/7] Evaluating on test set...")
-    summary = evaluate(model=model, test_loader=test_loader, device=device)
+    masks_dir = os.path.join(DATA_ROOT, "masks")
+    summary = evaluate(model=model, test_loader=test_loader, device=device, masks_dir=masks_dir)
 
     # ── Step 7: Generate explainability maps ──
     print("\n[Step 7/7] Generating saliency maps...")
@@ -91,16 +104,21 @@ def main():
     print("       DermaViT — Final Results")
     print("-" * 50)
     acc_s = f"{summary['accuracy']:.1f}"
+    top3_s = f"{summary.get('top3_accuracy', 0.0):.1f}"
     prec_s = f"{summary['precision']:.1f}"
     rec_s = f"{summary['recall']:.1f}"
-    f1_s = f"{summary['f1']:.1f}"
+    f1_s = f"{summary['f1_score']:.1f}"
     auc_s = f"{summary['auc']:.1f}"
 
     print(f"  Accuracy (Test) : {acc_s:>5}%")
+    print(f"  Top-3 Accuracy  : {top3_s:>5}%")
     print(f"  Precision       : {prec_s:>5}%")
     print(f"  Recall          : {rec_s:>5}%")
     print(f"  F1-Score        : {f1_s:>5}%")
     print(f"  AUC (Macro)     : {auc_s:>5}%")
+    if 'mean_dice' in summary:
+        dice_s = f"{summary['mean_dice']:.4f}"
+        print(f"  Mean Dice (XAI) : {dice_s:>5}")
     print("=" * 50)
 
     print("\n✓ Pipeline complete! All outputs saved to:")

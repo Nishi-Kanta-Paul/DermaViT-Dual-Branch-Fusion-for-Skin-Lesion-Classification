@@ -55,7 +55,7 @@ class GradCAM:
     def _save_gradient(self, module, grad_input, grad_output):
         self.gradients = grad_output[0].detach()
 
-    def generate(self, input_tensor, target_class=None):
+    def generate(self, input_tensor, metadata=None, target_class=None):
         """
         Generate Grad-CAM heatmap.
         
@@ -66,7 +66,7 @@ class GradCAM:
         input_tensor.requires_grad_(True)
 
         # Forward
-        logits = self.model(input_tensor)
+        logits = self.model(input_tensor, metadata)
 
         if target_class is None:
             target_class = logits.argmax(dim=1).item()
@@ -131,7 +131,7 @@ class SwinAttentionRollout:
         # we hook and compute from the qkv projection.
         pass  # We'll use an alternative approach
 
-    def generate(self, input_tensor):
+    def generate(self, input_tensor, metadata=None):
         """
         Generate attention rollout map using Swin's internal attention.
         
@@ -167,7 +167,7 @@ class SwinAttentionRollout:
             hooks.append(h)
 
         with torch.no_grad():
-            _ = self.model(input_tensor)
+            _ = self.model(input_tensor, metadata)
 
         # Remove hooks
         for h in hooks:
@@ -240,19 +240,24 @@ def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=
 
     # Collect random test samples
     all_images = []
+    all_metadata = []
     all_labels = []
     all_preds = []
 
     with torch.no_grad():
-        for images, labels in test_loader:
+        for batch in test_loader:
+            images, metadata, labels = batch
             images = images.to(device)
-            logits = model(images)
+            metadata = metadata.to(device)
+            logits = model(images, metadata)
             preds = logits.argmax(dim=1)
             all_images.append(images.cpu())
+            all_metadata.append(metadata.cpu())
             all_labels.extend(labels.numpy())
             all_preds.extend(preds.cpu().numpy())
 
     all_images = torch.cat(all_images, dim=0)
+    all_metadata = torch.cat(all_metadata, dim=0)
     all_labels = np.array(all_labels)
     all_preds = np.array(all_preds)
 
@@ -272,6 +277,7 @@ def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=
 
     for count, idx in enumerate(tqdm(indices, desc="  Saliency")):
         img_tensor = all_images[idx].unsqueeze(0).to(device)
+        meta_tensor = all_metadata[idx].unsqueeze(0).to(device)
         true_label = all_labels[idx]
         pred_label = all_preds[idx]
 
@@ -280,18 +286,27 @@ def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=
 
         # 2. Grad-CAM
         try:
-            cam_map = grad_cam.generate(img_tensor.clone(), target_class=int(pred_label))
+            cam_map = grad_cam.generate(img_tensor.clone(), meta_tensor, target_class=int(pred_label))
         except Exception:
             cam_map = np.zeros((224, 224), dtype=np.float32)
 
         # 3. Swin attention rollout
         try:
-            swin_map = swin_rollout.generate(img_tensor.clone())
+            swin_map = swin_rollout.generate(img_tensor.clone(), meta_tensor)
         except Exception:
             swin_map = np.zeros((224, 224), dtype=np.float32)
 
-        # 4. Joint saliency
-        joint_map = LAMBDA_SALIENCY * cam_map + (1 - LAMBDA_SALIENCY) * swin_map
+        # 4. Class-adaptive lambda from SE weights
+        lambda_c = LAMBDA_SALIENCY
+        if model.se_weights is not None:
+            se_w = model.se_weights[0].cpu().numpy()
+            w_cnn = se_w[:1280].mean()
+            w_swin = se_w[1280:].mean()
+            if (w_cnn + w_swin) > 0:
+                lambda_c = w_cnn / (w_cnn + w_swin)
+        
+        # Joint saliency with class-adaptive lambda
+        joint_map = lambda_c * cam_map + (1 - lambda_c) * swin_map
         if joint_map.max() > joint_map.min():
             joint_map = (joint_map - joint_map.min()) / (joint_map.max() - joint_map.min() + 1e-8)
 
@@ -322,7 +337,7 @@ def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=
         axes[2].axis('off')
 
         axes[3].imshow(overlay)
-        axes[3].set_title(f'Joint Saliency\nPred: {CLASS_NAMES[pred_label]}', fontsize=11)
+        axes[3].set_title(f'Joint Saliency (λ={lambda_c:.3f})\nPred: {CLASS_NAMES[pred_label]}', fontsize=11)
         axes[3].axis('off')
 
         plt.suptitle(

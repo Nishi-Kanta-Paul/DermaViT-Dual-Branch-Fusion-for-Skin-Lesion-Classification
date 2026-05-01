@@ -49,9 +49,7 @@ class DualScopeFusionBlock(nn.Module):
         self.se = SEBlock(input_dim, reduction_ratio)
 
     def forward(self, f_local, f_global):
-        print(f"DEBUG: f_local dim={f_local.dim()} shape={f_local.shape}")
-        print(f"DEBUG: f_global dim={f_global.dim()} shape={f_global.shape}")
-        f_cat = torch.cat([f_local, f_global], dim=1)  # [B, 2048]
+        f_cat = torch.cat([f_local, f_global], dim=1)  # [B, 2048]  # CHANGED: removed debug prints
         f_fused = self.se(f_cat)                         # [B, 2048]
         return f_fused
 
@@ -70,12 +68,14 @@ class DermaViT(nn.Module):
         DualScopeFusionBlock(2048) → F_fused ∈ R^2048
     
     Classifier:
-        BatchNorm1d(2048) → Dropout(0.4) → Linear(2048, 7)
+        BatchNorm1d(2048+metadata_dim) → Dropout(0.4) → Linear(2048+metadata_dim, 7)  # CHANGED
     """
 
     def __init__(self, num_classes: int = NUM_CLASSES, dropout: float = DROPOUT,
-                 se_reduction: int = SE_REDUCTION_RATIO, pretrained: bool = True):
+                 se_reduction: int = SE_REDUCTION_RATIO, pretrained: bool = True,
+                 metadata_dim: int = 19):  # CHANGED: added metadata_dim parameter
         super().__init__()
+        self.metadata_dim = metadata_dim  # CHANGED
 
         # ── Branch 1: EfficientNet-B0 (local features) ──
         self.efficientnet = timm.create_model(
@@ -101,13 +101,16 @@ class DermaViT(nn.Module):
         )
 
         # ── Classifier Head ──
+        # CHANGED: Concatenate metadata with fused features
+        classifier_input_dim = 2048 + metadata_dim  # CHANGED: 2048 + 19 = 2067
         self.classifier = nn.Sequential(
-            nn.BatchNorm1d(2048),
+            nn.BatchNorm1d(classifier_input_dim),  # CHANGED
             nn.Dropout(p=dropout),
-            nn.Linear(2048, num_classes)
+            nn.Linear(classifier_input_dim, num_classes)  # CHANGED
         )
+        self.se_weights = None  # CHANGED: store SE weights for explainability
 
-    def forward(self, x):
+    def forward(self, x, metadata=None):  # CHANGED: added metadata parameter
         # Branch 1: EfficientNet-B0
         eff_features = self.efficientnet(x)  # [B, 1280, H, W] or [B, 1280*H*W]
         if eff_features.dim() == 4:
@@ -126,9 +129,24 @@ class DermaViT(nn.Module):
 
         # Fusion
         f_fused = self.fusion(f_local, f_global)  # [B, 2048]
+        
+        # CHANGED: Store SE weights for explainability (before residual)
+        # Extract from last SE forward pass
+        f_cat = torch.cat([f_local, f_global], dim=1)
+        w = F.relu(self.fusion.se.fc1(f_cat))
+        self.se_weights = torch.sigmoid(self.fusion.se.fc2(w))  # [B, 2048]
+
+        # CHANGED: Concatenate metadata with fused features
+        if metadata is not None:
+            f_combined = torch.cat([f_fused, metadata], dim=1)  # [B, 2048+19]
+        else:
+            # Fallback: zero metadata
+            batch_size = f_fused.size(0)
+            zero_metadata = torch.zeros(batch_size, self.metadata_dim, device=f_fused.device)
+            f_combined = torch.cat([f_fused, zero_metadata], dim=1)
 
         # Classifier
-        logits = self.classifier(f_fused)  # [B, num_classes]
+        logits = self.classifier(f_combined)  # [B, num_classes]  # CHANGED
         return logits
 
     def get_param_groups(self):

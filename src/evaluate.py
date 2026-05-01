@@ -15,16 +15,86 @@ from sklearn.metrics import (
     classification_report, confusion_matrix,
     roc_curve, auc, precision_score, recall_score, f1_score, accuracy_score
 )
+import cv2
 from tqdm import tqdm
 
 from config import (
-    NUM_CLASSES, CLASS_NAMES, BEST_MODEL_PATH, RESULTS_DIR
+    NUM_CLASSES, CLASS_NAMES, BEST_MODEL_PATH, RESULTS_DIR,
+    SALIENCY_DIR, DATA_ROOT
 )
 from model import DermaViT
 from utils import load_checkpoint
 
 
-def evaluate(model=None, test_loader=None, device=None):
+def evaluate_xai_with_dice(model, test_loader, masks_dir, device):
+    """
+    Evaluate XAI quality using Dice coefficient with ground truth segmentation masks.
+    
+    Args:
+        model: trained DermaViT model
+        test_loader: test DataLoader
+        masks_dir: path to segmentation masks directory
+        device: torch device
+    
+    Returns:
+        list of Dice scores
+    """
+    from explainability import GradCAM, SwinAttentionRollout
+    from config import LAMBDA_SALIENCY
+    
+    model.eval()
+    dice_scores = []
+    
+    grad_cam = GradCAM(model)
+    swin_rollout = SwinAttentionRollout(model)
+    
+    for batch in test_loader:
+        images, metadata, labels = batch
+        images = images.to(device)
+        metadata = metadata.to(device)
+        
+        for i in range(images.size(0)):
+            img_tensor = images[i:i+1]
+            meta_tensor = metadata[i:i+1]
+            
+            try:
+                with torch.no_grad():
+                    logits = model(img_tensor, meta_tensor)
+                    pred_label = logits.argmax(dim=1).item()
+                
+                cam_map = grad_cam.generate(img_tensor.clone(), target_class=int(pred_label))
+                swin_map = swin_rollout.generate(img_tensor.clone())
+                
+                joint_map = LAMBDA_SALIENCY * cam_map + (1 - LAMBDA_SALIENCY) * swin_map
+                if joint_map.max() > joint_map.min():
+                    joint_map = (joint_map - joint_map.min()) / (joint_map.max() - joint_map.min() + 1e-8)
+                
+                binary_saliency = (joint_map > 0.5).astype(np.uint8)
+                
+                image_id = test_loader.dataset.image_ids[len(dice_scores)]
+                mask_path = os.path.join(masks_dir, f"{image_id}_segmentation.png")
+                
+                if os.path.exists(mask_path):
+                    gt_mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                    gt_mask = cv2.resize(gt_mask, (224, 224))
+                    gt_mask = (gt_mask > 127).astype(np.uint8)
+                    
+                    intersection = np.sum(binary_saliency * gt_mask)
+                    union = np.sum(binary_saliency) + np.sum(gt_mask)
+                    
+                    if union > 0:
+                        dice = 2.0 * intersection / union
+                        dice_scores.append(dice)
+            except Exception as e:
+                continue
+    
+    grad_cam.remove_hooks()
+    swin_rollout.remove_hooks()
+    
+    return dice_scores
+
+
+def evaluate(model=None, test_loader=None, device=None, masks_dir=None):
     """
     Full evaluation on test set.
     
@@ -32,6 +102,7 @@ def evaluate(model=None, test_loader=None, device=None):
         model: trained DermaViT model (if None, loads from checkpoint)
         test_loader: test DataLoader
         device: torch device
+        masks_dir: path to segmentation masks directory (optional)
     
     Returns:
         dict of summary metrics
@@ -56,16 +127,23 @@ def evaluate(model=None, test_loader=None, device=None):
     all_preds = []
     all_labels = []
     all_probs = []
+    all_top3_correct = []
 
     with torch.no_grad():
-        for images, labels in tqdm(test_loader, desc="  Evaluating"):
+        for batch in tqdm(test_loader, desc="  Evaluating"):
+            images, metadata, labels = batch
             images = images.to(device, non_blocking=True)
+            metadata = metadata.to(device, non_blocking=True)
 
             with autocast():
-                logits = model(images)
+                logits = model(images, metadata)
 
             probs = torch.softmax(logits.float(), dim=1)
             _, preds = logits.max(1)
+            
+            _, top3_preds = torch.topk(logits, k=3, dim=1)
+            for i, label in enumerate(labels):
+                all_top3_correct.append(label.item() in top3_preds[i].cpu().numpy())
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.numpy())
@@ -74,6 +152,7 @@ def evaluate(model=None, test_loader=None, device=None):
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
     all_probs = np.array(all_probs)
+    all_top3_correct = np.array(all_top3_correct)
 
     # ── 1. Classification Report ──
     report = classification_report(
@@ -145,6 +224,7 @@ def evaluate(model=None, test_loader=None, device=None):
     macro_rec = recall_score(all_labels, all_preds, average='macro') * 100
     macro_f1 = f1_score(all_labels, all_preds, average='macro') * 100
     macro_auc_val = np.mean(macro_auc_list) * 100
+    top3_acc = np.mean(all_top3_correct) * 100
 
     summary = {
         'accuracy': overall_acc,
@@ -152,12 +232,14 @@ def evaluate(model=None, test_loader=None, device=None):
         'recall': macro_rec,
         'f1_score': macro_f1,
         'auc': macro_auc_val,
+        'top3_accuracy': top3_acc,
     }
 
     print("\n┌─────────────────────────────────┐")
     print("│ DermaViT — Test Results         │")
     print("├─────────────────────────────────┤")
     print(f"│ Accuracy:  {overall_acc:.1f}%{' '*(19-len(f'{overall_acc:.1f}'))}│")
+    print(f"│ Top-3 Acc: {top3_acc:.1f}%{' '*(19-len(f'{top3_acc:.1f}'))}│")
     print(f"│ Precision: {macro_prec:.1f}%{' '*(19-len(f'{macro_prec:.1f}'))}│")
     print(f"│ Recall:    {macro_rec:.1f}%{' '*(19-len(f'{macro_rec:.1f}'))}│")
     print(f"│ F1-score:  {macro_f1:.1f}%{' '*(19-len(f'{macro_f1:.1f}'))}│")
@@ -172,6 +254,27 @@ def evaluate(model=None, test_loader=None, device=None):
         for k, v in summary.items():
             f.write(f"{k}: {v:.2f}%\n")
     print(f"  ✓ Summary saved to {summary_path}")
+    
+    if masks_dir and os.path.exists(masks_dir):
+        print("\n  Running Dice-based XAI evaluation...")
+        dice_scores = evaluate_xai_with_dice(model, test_loader, masks_dir, device)
+        if dice_scores:
+            mean_dice = np.mean(dice_scores)
+            summary['mean_dice'] = mean_dice
+            print(f"  ✓ Mean Dice Score: {mean_dice:.4f} (n={len(dice_scores)} samples)")
+            
+            dice_path = os.path.join(RESULTS_DIR, "dice_scores.txt")
+            with open(dice_path, 'w') as f:
+                f.write("DermaViT — Dice-based XAI Evaluation\n")
+                f.write("=" * 40 + "\n")
+                f.write(f"Mean Dice Score: {mean_dice:.4f}\n")
+                f.write(f"Samples evaluated: {len(dice_scores)}\n")
+                f.write("\nPer-sample scores:\n")
+                for i, score in enumerate(dice_scores):
+                    f.write(f"  Sample {i+1}: {score:.4f}\n")
+            print(f"  ✓ Dice scores saved to {dice_path}")
+    else:
+        print("\n  ⚠ Segmentation masks not found, skipping Dice-based XAI evaluation")
 
     return summary
 
