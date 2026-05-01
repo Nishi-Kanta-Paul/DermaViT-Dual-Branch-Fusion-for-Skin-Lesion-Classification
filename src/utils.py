@@ -1,3 +1,6 @@
+# ═══ DermaViT v2.1 ═══
+# Modified: Fix 2a - Clinical weight multipliers
+# All changes marked with # CHANGED
 """
 DermaViT Utilities
 Seed setting, class weights, checkpointing, plotting, and reporting.
@@ -23,27 +26,38 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-def get_class_weights(labels, num_classes: int):
-    """
-    Compute inverse-frequency class weights: w_c = N / (C * n_c).
+def get_class_weights(labels, num_classes: int):  # CHANGED
+    """  # CHANGED
+    Compute inverse-frequency class weights with clinical multipliers: w_c = N / (C * n_c) * clinical_mult.  # CHANGED
     
-    Args:
-        labels: array-like of integer labels
-        num_classes: number of classes
+    Args:  # CHANGED
+        labels: array-like of integer labels  # CHANGED
+        num_classes: number of classes  # CHANGED
     
-    Returns:
-        torch.FloatTensor of shape [num_classes]
-    """
-    labels = np.array(labels)
-    N = len(labels)
-    weights = []
-    for c in range(num_classes):
-        n_c = np.sum(labels == c)
-        if n_c == 0:
-            weights.append(1.0)
-        else:
-            weights.append(N / (num_classes * n_c))
-    return torch.FloatTensor(weights)
+    Returns:  # CHANGED
+        torch.FloatTensor of shape [num_classes]  # CHANGED
+    """  # CHANGED
+    from config import CLINICAL_WEIGHT_MULTIPLIER, CLASS_NAMES  # CHANGED: Import clinical weights
+    
+    labels = np.array(labels)  # CHANGED
+    N = len(labels)  # CHANGED
+    weights = []  # CHANGED
+    for c in range(num_classes):  # CHANGED
+        n_c = np.sum(labels == c)  # CHANGED
+        if n_c == 0:  # CHANGED
+            weights.append(1.0)  # CHANGED
+        else:  # CHANGED
+            base_weight = N / (num_classes * n_c)  # CHANGED: Compute base weight
+            # CHANGED: Apply clinical multiplier
+            class_name = CLASS_NAMES[c]  # CHANGED
+            clinical_mult = CLINICAL_WEIGHT_MULTIPLIER.get(class_name, 1.0)  # CHANGED
+            weights.append(base_weight * clinical_mult)  # CHANGED
+    
+    # CHANGED: Normalize weights to sum to num_classes (maintains scale)
+    weights = np.array(weights)  # CHANGED
+    weights = weights * (num_classes / weights.sum())  # CHANGED
+    
+    return torch.FloatTensor(weights)  # CHANGED
 
 
 def save_checkpoint(model, optimizer, epoch, val_f1, path):

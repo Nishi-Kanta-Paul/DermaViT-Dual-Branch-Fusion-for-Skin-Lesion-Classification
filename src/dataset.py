@@ -1,3 +1,6 @@
+# ═══ DermaViT v2.1 ═══
+# Modified: Fix 2c - MEL-specific augmentation
+# All changes marked with # CHANGED
 """
 DermaViT Dataset
 Skin lesion dataset loading with CLAHE preprocessing, albumentations transforms,
@@ -162,6 +165,35 @@ class SkinLesionDataset(Dataset):
         if self.transform:
             augmented = self.transform(image=image)
             image = augmented['image']
+        
+        # CHANGED: MEL-specific extra augmentation (Fix 2c)
+        # Apply additional augmentation to MEL class (label 0) with p=0.5
+        if label == 0 and self.transform is not None:  # CHANGED: MEL class
+            try:  # CHANGED: Wrap in try-except for version compatibility
+                import random  # CHANGED
+                if random.random() < 0.5:  # CHANGED: 50% probability
+                    # CHANGED: Convert tensor back to numpy for augmentation
+                    if isinstance(image, torch.Tensor):  # CHANGED
+                        img_np = image.permute(1, 2, 0).cpu().numpy()  # CHANGED: [C,H,W] -> [H,W,C]
+                        # CHANGED: Denormalize
+                        mean = np.array(IMAGENET_MEAN).reshape(1, 1, 3)  # CHANGED
+                        std = np.array(IMAGENET_STD).reshape(1, 1, 3)  # CHANGED
+                        img_np = img_np * std + mean  # CHANGED
+                        img_np = (img_np * 255).clip(0, 255).astype(np.uint8)  # CHANGED
+                    else:  # CHANGED
+                        img_np = image  # CHANGED
+                    
+                    # CHANGED: Apply MEL-specific augmentation
+                    mel_aug = A.Compose([  # CHANGED
+                        A.ElasticTransform(alpha=1, sigma=50, p=1.0),  # CHANGED
+                        A.GridDistortion(distort_limit=0.2, p=1.0),  # CHANGED
+                        A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),  # CHANGED
+                        ToTensorV2(),  # CHANGED
+                    ])  # CHANGED
+                    augmented_mel = mel_aug(image=img_np)  # CHANGED
+                    image = augmented_mel['image']  # CHANGED
+            except Exception:  # CHANGED: Silently skip if augmentation fails
+                pass  # CHANGED
 
         # CHANGED: Extract metadata vector
         metadata_vec = self._get_metadata_vector(image_id)

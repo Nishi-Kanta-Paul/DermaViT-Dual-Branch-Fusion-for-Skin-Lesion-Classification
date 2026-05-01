@@ -1,3 +1,6 @@
+# ═══ DermaViT v2.1 ═══
+# Modified: Fix 3 (multi-seed training), Fix 5 (external validation)
+# All changes marked with # CHANGED
 """
 DermaViT — Main Entry Point
 Runs the complete pipeline: seed → data → model → train → evaluate → explain.
@@ -5,13 +8,16 @@ Runs the complete pipeline: seed → data → model → train → evaluate → e
 import os
 import sys
 import time
+import numpy as np  # CHANGED: Import for multi-seed aggregation
 import torch
 
 from config import (
     SEED, BATCH_SIZE, NUM_EPOCHS, NUM_CLASSES,
     GROUNDTRUTH_CSV, IMAGE_DIR, OUTPUT_DIR,
     RESULTS_DIR, SALIENCY_DIR, BEST_MODEL_PATH,
-    CLASS_NAMES, ABLATION_MODE, DATA_ROOT
+    CLASS_NAMES, ABLATION_MODE, DATA_ROOT,
+    MULTI_SEED_MODE, TRAINING_SEEDS,  # CHANGED: Import multi-seed config (Fix 3)
+    EXTERNAL_VALIDATION, EXTERNAL_DATA_PATH, EXTERNAL_METADATA_PATH, EXTERNAL_DATASET_NAME  # CHANGED: Import external validation config (Fix 5)
 )
 from utils import set_seed, load_checkpoint
 from dataset import get_dataloaders
@@ -19,11 +25,15 @@ from model import DermaViT
 from train import train, run_ablation_study
 from evaluate import evaluate
 from explainability import generate_saliency_maps
+from external_validate import validate_external  # CHANGED: Import external validation (Fix 5)
 
 
-def main():
-    """Run the complete DermaViT pipeline."""
-    start_time = time.time()
+def run_single_seed_pipeline(seed=SEED):  # CHANGED: Renamed and parameterized (Fix 3)
+    """Run the complete DermaViT pipeline for a single seed."""  # CHANGED
+    start_time = time.time()  # CHANGED
+    
+    # CHANGED: Use provided seed
+    set_seed(seed)  # CHANGED
 
     print("=" * 50)
     print("      DermaViT — Skin Lesion Classification")
@@ -32,8 +42,8 @@ def main():
 
     # ── Step 1: Set seed for reproducibility ──
     print("\n[Step 1/7] Setting random seed...")
-    set_seed(SEED)
-    print(f"  ✓ Seed set to {SEED}")
+    # CHANGED: Already set at function start, just print
+    print(f"  ✓ Seed set to {seed}")  # CHANGED
 
     # ── Step 2: Setup device ──
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -93,6 +103,21 @@ def main():
     # ── Step 7: Generate explainability maps ──
     print("\n[Step 7/7] Generating saliency maps...")
     generate_saliency_maps(model=model, test_loader=test_loader, device=device, n_samples=20)
+    
+    # CHANGED: External validation (Fix 5)
+    if EXTERNAL_VALIDATION and EXTERNAL_DATA_PATH and EXTERNAL_METADATA_PATH:  # CHANGED
+        print("\n[Extra] Running external validation...")  # CHANGED
+        try:  # CHANGED
+            ext_summary = validate_external(  # CHANGED
+                model_path=BEST_MODEL_PATH,  # CHANGED
+                image_dir=EXTERNAL_DATA_PATH,  # CHANGED
+                metadata_csv=EXTERNAL_METADATA_PATH,  # CHANGED
+                dataset_name=EXTERNAL_DATASET_NAME,  # CHANGED
+                output_dir=os.path.join(OUTPUT_DIR, "external"),  # CHANGED
+                device=str(device)  # CHANGED
+            )  # CHANGED
+        except Exception as e:  # CHANGED
+            print(f"  ⚠ External validation failed: {e}")  # CHANGED
 
     # ── Final Summary ──
     elapsed = time.time() - start_time
@@ -125,6 +150,115 @@ def main():
     print(f"  • Best model:     {BEST_MODEL_PATH}")
     print(f"  • Results:        {RESULTS_DIR}/")
     print(f"  • Saliency maps:  {SALIENCY_DIR}/")
+    
+    return summary  # CHANGED: Return summary for multi-seed aggregation
+
+
+# CHANGED: Multi-seed training wrapper (Fix 3)
+def run_multi_seed_training():  # CHANGED
+    """Run training across multiple seeds and aggregate results."""  # CHANGED
+    print("\n" + "=" * 70)  # CHANGED
+    print("DermaViT — Multi-Seed Training Mode")  # CHANGED
+    print("=" * 70)  # CHANGED
+    print(f"\n  Training seeds: {TRAINING_SEEDS}")  # CHANGED
+    print(f"  Total runs: {len(TRAINING_SEEDS)}\n")  # CHANGED
+    
+    all_summaries = []  # CHANGED
+    
+    for seed_idx, seed in enumerate(TRAINING_SEEDS, 1):  # CHANGED
+        print("\n" + "=" * 70)  # CHANGED
+        print(f"SEED {seed_idx}/{len(TRAINING_SEEDS)}: {seed}")  # CHANGED
+        print("=" * 70)  # CHANGED
+        
+        # CHANGED: Update paths for this seed
+        seed_output_dir = os.path.join(OUTPUT_DIR, f"seed_{seed}")  # CHANGED
+        os.makedirs(seed_output_dir, exist_ok=True)  # CHANGED
+        
+        # CHANGED: Temporarily override global paths
+        import config  # CHANGED
+        original_output_dir = config.OUTPUT_DIR  # CHANGED
+        original_results_dir = config.RESULTS_DIR  # CHANGED
+        original_saliency_dir = config.SALIENCY_DIR  # CHANGED
+        original_best_model_path = config.BEST_MODEL_PATH  # CHANGED
+        
+        config.OUTPUT_DIR = seed_output_dir  # CHANGED
+        config.RESULTS_DIR = os.path.join(seed_output_dir, "results")  # CHANGED
+        config.SALIENCY_DIR = os.path.join(seed_output_dir, "saliency_maps")  # CHANGED
+        config.BEST_MODEL_PATH = os.path.join(seed_output_dir, f"best_model_seed{seed}.pth")  # CHANGED
+        
+        os.makedirs(config.RESULTS_DIR, exist_ok=True)  # CHANGED
+        os.makedirs(config.SALIENCY_DIR, exist_ok=True)  # CHANGED
+        
+        # CHANGED: Run single seed pipeline
+        try:  # CHANGED
+            summary = run_single_seed_pipeline(seed=seed)  # CHANGED
+            all_summaries.append(summary)  # CHANGED
+        except Exception as e:  # CHANGED
+            print(f"  ⚠ Seed {seed} failed: {e}")  # CHANGED
+            continue  # CHANGED
+        
+        # CHANGED: Restore original paths
+        config.OUTPUT_DIR = original_output_dir  # CHANGED
+        config.RESULTS_DIR = original_results_dir  # CHANGED
+        config.SALIENCY_DIR = original_saliency_dir  # CHANGED
+        config.BEST_MODEL_PATH = original_best_model_path  # CHANGED
+    
+    # CHANGED: Aggregate results across seeds
+    if len(all_summaries) == 0:  # CHANGED
+        print("\n⚠ No successful runs to aggregate")  # CHANGED
+        return  # CHANGED
+    
+    print("\n" + "=" * 70)  # CHANGED
+    print("Multi-Seed Results Aggregation")  # CHANGED
+    print("=" * 70)  # CHANGED
+    
+    # CHANGED: Compute mean ± std for each metric
+    metrics = ['accuracy', 'precision', 'recall', 'f1_score', 'auc', 'top3_accuracy']  # CHANGED
+    aggregated = {}  # CHANGED
+    
+    for metric in metrics:  # CHANGED
+        values = [s.get(metric, 0.0) for s in all_summaries]  # CHANGED
+        aggregated[metric] = {  # CHANGED
+            'mean': np.mean(values),  # CHANGED
+            'std': np.std(values)  # CHANGED
+        }  # CHANGED
+    
+    # CHANGED: Save aggregated results
+    summary_path = os.path.join(OUTPUT_DIR, "results", "multi_seed_summary.txt")  # CHANGED
+    os.makedirs(os.path.dirname(summary_path), exist_ok=True)  # CHANGED
+    
+    with open(summary_path, 'w') as f:  # CHANGED
+        f.write("DermaViT — Multi-Seed Training Summary\n")  # CHANGED
+        f.write("=" * 70 + "\n\n")  # CHANGED
+        f.write(f"Seeds: {TRAINING_SEEDS}\n")  # CHANGED
+        f.write(f"Successful runs: {len(all_summaries)}/{len(TRAINING_SEEDS)}\n\n")  # CHANGED
+        f.write("Results (mean ± std):\n")  # CHANGED
+        f.write("-" * 70 + "\n")  # CHANGED
+        for metric in metrics:  # CHANGED
+            mean = aggregated[metric]['mean']  # CHANGED
+            std = aggregated[metric]['std']  # CHANGED
+            f.write(f"{metric.replace('_', ' ').title():<20}: {mean:>5.1f} ± {std:>4.1f}%\n")  # CHANGED
+    
+    print(f"\n  ✓ Multi-seed summary saved to {summary_path}")  # CHANGED
+    
+    # CHANGED: Print summary
+    print("\n  Results (mean ± std):")  # CHANGED
+    for metric in metrics:  # CHANGED
+        mean = aggregated[metric]['mean']  # CHANGED
+        std = aggregated[metric]['std']  # CHANGED
+        print(f"    {metric.replace('_', ' ').title():<20}: {mean:>5.1f} ± {std:>4.1f}%")  # CHANGED
+    
+    print("\n" + "=" * 70)  # CHANGED
+    print("✓ Multi-seed training complete!")  # CHANGED
+    print("=" * 70)  # CHANGED
+
+
+def main():  # CHANGED
+    """Main entry point with multi-seed support."""  # CHANGED
+    if MULTI_SEED_MODE:  # CHANGED
+        run_multi_seed_training()  # CHANGED
+    else:  # CHANGED
+        run_single_seed_pipeline()  # CHANGED
 
 
 if __name__ == '__main__':

@@ -1,6 +1,9 @@
+# ═══ DermaViT v2.1 ═══
+# Modified: Fix 1 - Swin Feature Map Visualization (replaced broken attention rollout)
+# All changes marked with # CHANGED
 """
 DermaViT Explainability
-Generate joint saliency maps: CNN Grad-CAM + Swin Attention Rollout.
+Generate joint saliency maps: CNN Grad-CAM + Swin Feature Map Visualization.
 """
 import os
 import numpy as np
@@ -100,119 +103,111 @@ class GradCAM:
         self.hook_backward.remove()
 
 
-class SwinAttentionRollout:
-    """
-    Attention rollout for Swin Transformer.
-    Collects attention weights from all layers and computes rollout.
-    """
+class SwinAttentionRollout:  # CHANGED: Renamed to SwinFeatureMapVisualization internally but kept class name for compatibility
+    """  # CHANGED
+    Swin Feature Map Visualization using Stage 4 output.  # CHANGED
+    Replaces broken attention rollout with spatial activation maps.  # CHANGED
+    """  # CHANGED
 
-    def __init__(self, model):
-        self.model = model
-        self.attention_maps = []
-        self.hooks = []
-        self._register_hooks()
+    def __init__(self, model):  # CHANGED
+        self.model = model  # CHANGED
+        self.stage4_features = None  # CHANGED: Store Stage 4 features
+        self.hook_handle = None  # CHANGED: Single hook for Stage 4
 
-    def _register_hooks(self):
-        """Register forward hooks on all attention modules in Swin-T."""
-        for layer in self.model.swin.layers:
-            for block in layer.blocks:
-                hook = block.attn.register_forward_hook(self._save_attention)
-                self.hooks.append(hook)
-
-    def _save_attention(self, module, input, output):
-        """
-        Capture attention weights from Swin window attention.
-        The attention probability is computed inside the module.
-        We'll use the softmax output.
-        """
-        # For Swin, we need to access the attention weights
-        # We'll compute attention from Q, K inside the module
-        # Since timm's WindowAttention may not expose attn directly,
-        # we hook and compute from the qkv projection.
-        pass  # We'll use an alternative approach
-
-    def generate(self, input_tensor, metadata=None):
-        """
-        Generate attention rollout map using Swin's internal attention.
+    def generate(self, input_tensor, metadata=None):  # CHANGED
+        """  # CHANGED
+        Generate spatial attention map from Swin-T Stage 4 feature maps.  # CHANGED
         
-        Alternative approach: Use the output features spatial pattern
-        to generate an attention-like map.
+        Steps:  # CHANGED
+        1. Register hook on Stage 4 output (7x7x768 features)  # CHANGED
+        2. Forward pass to capture features  # CHANGED
+        3. Compute spatial importance as mean across channels  # CHANGED
+        4. Apply ReLU and normalize  # CHANGED
+        5. Upsample to 224x224  # CHANGED
         
-        Returns:
-            attn_map: numpy array of shape [224, 224] normalized to [0, 1]
-        """
-        self.model.eval()
+        Returns:  # CHANGED
+            attn_map: numpy array of shape [224, 224] normalized to [0, 1]  # CHANGED
+        """  # CHANGED
+        self.model.eval()  # CHANGED
+        self.stage4_features = None  # CHANGED: Reset
 
-        # For Swin-T with 224x224 input:
-        # After patch embedding: 56x56 patches (patch_size=4)
-        # Layer 0: 56x56 → No downsampling in blocks, downsample at merge
-        # Layer 1: 28x28
-        # Layer 2: 14x14
-        # Layer 3: 7x7
+        # CHANGED: Hook function to capture Stage 4 output
+        def hook_fn(module, input, output):  # CHANGED
+            """Capture Stage 4 feature map."""  # CHANGED
+            self.stage4_features = output.detach()  # CHANGED
 
-        # Get features from intermediate layers
-        attn_maps = []
+        # CHANGED: Register hook on Swin-T Stage 4 (last layer)
+        # In timm's Swin-T, layers[-1] is Stage 4, which outputs [B, 7, 7, 768]
+        try:  # CHANGED
+            target_layer = self.model.swin.layers[-1]  # CHANGED: Stage 4
+            self.hook_handle = target_layer.register_forward_hook(hook_fn)  # CHANGED
+        except (AttributeError, IndexError):  # CHANGED
+            # CHANGED: Fallback if structure is different
+            try:  # CHANGED
+                target_layer = self.model.swin.norm  # CHANGED: Final LayerNorm after Stage 4
+                self.hook_handle = target_layer.register_forward_hook(hook_fn)  # CHANGED
+            except AttributeError:  # CHANGED
+                pass  # CHANGED: Will return uniform map
 
-        # Hook to capture features at each stage
-        features = {}
+        # CHANGED: Forward pass to trigger hook
+        with torch.no_grad():  # CHANGED
+            _ = self.model(input_tensor, metadata)  # CHANGED
 
-        def make_hook(name):
-            def hook_fn(module, input, output):
-                features[name] = output.detach()
-            return hook_fn
+        # CHANGED: Remove hook immediately to avoid memory leaks
+        if self.hook_handle is not None:  # CHANGED
+            self.hook_handle.remove()  # CHANGED
+            self.hook_handle = None  # CHANGED
 
-        hooks = []
-        for i, layer in enumerate(self.model.swin.layers):
-            h = layer.register_forward_hook(make_hook(f'layer_{i}'))
-            hooks.append(h)
+        # CHANGED: Process captured features
+        if self.stage4_features is not None:  # CHANGED
+            feat = self.stage4_features  # CHANGED: [B, H, W, C] or [B, N, C]
+            
+            # CHANGED: Handle different output formats
+            if feat.dim() == 4:  # CHANGED: [B, H, W, C] format
+                B, H, W, C = feat.shape  # CHANGED
+                # CHANGED: Compute spatial importance as mean across channels
+                spatial_map = feat.mean(dim=-1)  # CHANGED: [B, H, W]
+            elif feat.dim() == 3:  # CHANGED: [B, N, C] format (flattened)
+                B, N, C = feat.shape  # CHANGED
+                # CHANGED: Reshape to spatial grid
+                H = W = int(np.sqrt(N))  # CHANGED: Assume square (7x7 for Stage 4)
+                if H * W == N:  # CHANGED
+                    spatial_map = feat.mean(dim=-1).reshape(B, H, W)  # CHANGED
+                else:  # CHANGED
+                    # CHANGED: Fallback for non-square
+                    spatial_map = feat.mean(dim=-1).reshape(B, 7, -1)[:, :, :7]  # CHANGED
+            else:  # CHANGED
+                # CHANGED: Unexpected format, return uniform map
+                attn_map = np.ones((224, 224), dtype=np.float32)  # CHANGED
+                return attn_map  # CHANGED
+            
+            # CHANGED: Apply ReLU to keep only positive activations
+            spatial_map = F.relu(spatial_map)  # CHANGED
+            
+            # CHANGED: Normalize to [0, 1]
+            spatial_map = spatial_map[0]  # CHANGED: Take first batch element
+            if spatial_map.max() > spatial_map.min():  # CHANGED
+                spatial_map = (spatial_map - spatial_map.min()) / (spatial_map.max() - spatial_map.min() + 1e-8)  # CHANGED
+            
+            # CHANGED: Upsample from 7x7 to 224x224 using bilinear interpolation
+            spatial_map = spatial_map.unsqueeze(0).unsqueeze(0)  # CHANGED: [1, 1, H, W]
+            attn_map = F.interpolate(  # CHANGED
+                spatial_map,  # CHANGED
+                size=(224, 224),  # CHANGED
+                mode='bilinear',  # CHANGED
+                align_corners=False  # CHANGED
+            ).squeeze().cpu().numpy()  # CHANGED: [224, 224]
+        else:  # CHANGED
+            # CHANGED: Fallback if hook failed
+            attn_map = np.ones((224, 224), dtype=np.float32)  # CHANGED
+        
+        return attn_map  # CHANGED
 
-        with torch.no_grad():
-            _ = self.model(input_tensor, metadata)
-
-        # Remove hooks
-        for h in hooks:
-            h.remove()
-
-        # Use the last layer's output as attention map
-        # Swin layers output: [B, H*W, C] or similar
-        if 'layer_3' in features:
-            feat = features['layer_3']
-            if feat.dim() == 3:
-                B, N, C = feat.shape
-                # Compute attention-like map from feature magnitudes
-                spatial_size = int(np.sqrt(N))
-                if spatial_size * spatial_size == N:
-                    attn = feat.norm(dim=-1).reshape(B, spatial_size, spatial_size)
-                else:
-                    attn = feat.norm(dim=-1).reshape(B, 1, N)
-                    spatial_size = 7
-                    attn = attn.reshape(B, spatial_size, -1)
-            elif feat.dim() == 4:
-                attn = feat.norm(dim=1, keepdim=True)  # [B, 1, H, W]
-                attn = attn.squeeze(1)
-            else:
-                attn = feat.norm(dim=-1)
-
-            # Convert to numpy and upsample
-            attn = attn[0].cpu().numpy()
-            if attn.ndim == 1:
-                side = int(np.sqrt(len(attn)))
-                attn = attn.reshape(side, side)
-            attn_map = cv2.resize(attn.astype(np.float32), (224, 224),
-                                   interpolation=cv2.INTER_LINEAR)
-        else:
-            # Fallback: uniform map
-            attn_map = np.ones((224, 224), dtype=np.float32)
-
-        # Normalize
-        if attn_map.max() > attn_map.min():
-            attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min() + 1e-8)
-
-        return attn_map
-
-    def remove_hooks(self):
-        for h in self.hooks:
-            h.remove()
+    def remove_hooks(self):  # CHANGED
+        """Remove any remaining hooks."""  # CHANGED
+        if self.hook_handle is not None:  # CHANGED
+            self.hook_handle.remove()  # CHANGED
+            self.hook_handle = None  # CHANGED
 
 
 def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=20):
@@ -333,7 +328,7 @@ def generate_saliency_maps(model=None, test_loader=None, device=None, n_samples=
         swin_vis = cv2.applyColorMap((swin_map * 255).astype(np.uint8), cv2.COLORMAP_JET)
         swin_vis = cv2.cvtColor(swin_vis, cv2.COLOR_BGR2RGB)
         axes[2].imshow(swin_vis)
-        axes[2].set_title('Swin Attention\nRollout', fontsize=11)
+        axes[2].set_title('Swin Stage-4\nFeature Map', fontsize=11)  # CHANGED: Updated title
         axes[2].axis('off')
 
         axes[3].imshow(overlay)

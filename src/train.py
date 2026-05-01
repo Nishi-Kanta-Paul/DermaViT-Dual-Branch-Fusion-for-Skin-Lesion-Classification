@@ -1,3 +1,6 @@
+# ═══ DermaViT v2.1 ═══
+# Modified: Fix 2b (label smoothing), Fix 4a (ReduceLROnPlateau), Fix 4b (MixUp)
+# All changes marked with # CHANGED
 """
 DermaViT Training Loop
 Complete training with AMP, differential LRs, cosine annealing,
@@ -18,7 +21,8 @@ from config import (
     OUTPUT_DIR, RESULTS_DIR, BEST_MODEL_PATH,
     EARLY_STOPPING_PATIENCE, NUM_CLASSES,
     ABLATION_MODE, SE_REDUCTION_RATIOS, DROPOUT_RATES,  # CHANGED
-    LR_CNN_OPTIONS, LR_SWIN_OPTIONS, ABLATION_EPOCHS, ABLATION_PATIENCE  # CHANGED
+    LR_CNN_OPTIONS, LR_SWIN_OPTIONS, ABLATION_EPOCHS, ABLATION_PATIENCE,  # CHANGED
+    LABEL_SMOOTHING, MIXUP_ALPHA, MIXUP_PROB  # CHANGED: Import new config values (Fix 2b, 4b)
 )
 from utils import (
     set_seed, save_checkpoint, plot_training_curves
@@ -27,45 +31,63 @@ from dataset import get_dataloaders
 from model import DermaViT
 
 
-def train_one_epoch(model, loader, criterion, optimizer, scaler, device):
-    """
-    Train for one epoch with mixed precision.
+def train_one_epoch(model, loader, criterion, optimizer, scaler, device):  # CHANGED
+    """  # CHANGED
+    Train for one epoch with mixed precision and MixUp augmentation.  # CHANGED
     
-    Returns:
-        avg_loss, accuracy (%)
-    """
-    model.train()
-    running_loss = 0.0
-    correct = 0
-    total = 0
+    Returns:  # CHANGED
+        avg_loss, accuracy (%)  # CHANGED
+    """  # CHANGED
+    model.train()  # CHANGED
+    running_loss = 0.0  # CHANGED
+    correct = 0  # CHANGED
+    total = 0  # CHANGED
 
-    pbar = tqdm(loader, desc="  Train", leave=False)
+    pbar = tqdm(loader, desc="  Train", leave=False)  # CHANGED
     for batch in pbar:  # CHANGED
         images, metadata, labels = batch  # CHANGED: unpack metadata
-        images = images.to(device, non_blocking=True)
+        images = images.to(device, non_blocking=True)  # CHANGED
         metadata = metadata.to(device, non_blocking=True)  # CHANGED
-        labels = labels.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)  # CHANGED
 
-        optimizer.zero_grad()
+        optimizer.zero_grad()  # CHANGED
+        
+        # CHANGED: MixUp augmentation (Fix 4b)
+        use_mixup = np.random.rand() < MIXUP_PROB  # CHANGED: Apply with probability
+        if use_mixup:  # CHANGED
+            # CHANGED: Sample lambda from Beta distribution
+            lam = np.random.beta(MIXUP_ALPHA, MIXUP_ALPHA)  # CHANGED
+            batch_size = images.size(0)  # CHANGED
+            index = torch.randperm(batch_size).to(device)  # CHANGED: Shuffle indices
+            
+            # CHANGED: Mix images and metadata
+            mixed_images = lam * images + (1 - lam) * images[index]  # CHANGED
+            mixed_metadata = lam * metadata + (1 - lam) * metadata[index]  # CHANGED
+            labels_a, labels_b = labels, labels[index]  # CHANGED
+            
+            with autocast():  # CHANGED
+                logits = model(mixed_images, mixed_metadata)  # CHANGED
+                # CHANGED: MixUp loss
+                loss = lam * criterion(logits, labels_a) + (1 - lam) * criterion(logits, labels_b)  # CHANGED
+        else:  # CHANGED: Standard training
+            with autocast():  # CHANGED
+                logits = model(images, metadata)  # CHANGED: pass metadata
+                loss = criterion(logits, labels)  # CHANGED
 
-        with autocast():
-            logits = model(images, metadata)  # CHANGED: pass metadata
-            loss = criterion(logits, labels)
+        scaler.scale(loss).backward()  # CHANGED
+        scaler.step(optimizer)  # CHANGED
+        scaler.update()  # CHANGED
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        running_loss += loss.item() * images.size(0)  # CHANGED
+        _, preds = logits.max(1)  # CHANGED
+        correct += preds.eq(labels).sum().item()  # CHANGED: Count correct (use original labels)
+        total += labels.size(0)  # CHANGED
 
-        running_loss += loss.item() * images.size(0)
-        _, preds = logits.max(1)
-        correct += preds.eq(labels).sum().item()
-        total += labels.size(0)
+        pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{100.*correct/total:.1f}%")  # CHANGED
 
-        pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{100.*correct/total:.1f}%")
-
-    avg_loss = running_loss / total
-    accuracy = 100.0 * correct / total
-    return avg_loss, accuracy
+    avg_loss = running_loss / total  # CHANGED
+    accuracy = 100.0 * correct / total  # CHANGED
+    return avg_loss, accuracy  # CHANGED
 
 
 def validate(model, loader, criterion, device):
@@ -266,13 +288,20 @@ def train(config=None):
         betas=(0.9, 0.999)
     )
 
-    # Scheduler
+    # Scheduler (cosine + plateau)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=10, T_mult=2, eta_min=1e-6
     )
+    # CHANGED: Add ReduceLROnPlateau as secondary scheduler (Fix 4a)
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(  # CHANGED
+        optimizer, mode='max', factor=0.5, patience=5, verbose=True  # CHANGED
+    )  # CHANGED
 
-    # Loss with class weights
-    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+    # CHANGED: Loss with class weights and label smoothing (Fix 2b)
+    criterion = nn.CrossEntropyLoss(  # CHANGED
+        weight=class_weights.to(device),  # CHANGED
+        label_smoothing=LABEL_SMOOTHING  # CHANGED: Add label smoothing
+    )  # CHANGED
 
     # Mixed precision scaler
     scaler = GradScaler()
@@ -297,8 +326,9 @@ def train(config=None):
             model, val_loader, criterion, device
         )
 
-        # Step scheduler
-        scheduler.step()
+        # Step schedulers
+        scheduler.step()  # CHANGED: Cosine scheduler
+        plateau_scheduler.step(val_f1)  # CHANGED: Plateau scheduler (Fix 4a)
 
         # Track metrics
         train_losses.append(train_loss)
