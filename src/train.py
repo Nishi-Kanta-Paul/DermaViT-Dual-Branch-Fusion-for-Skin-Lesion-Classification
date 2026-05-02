@@ -294,7 +294,7 @@ def train(config=None):
     )
     # CHANGED: Add ReduceLROnPlateau as secondary scheduler (Fix 4a)
     plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(  # CHANGED
-        optimizer, mode='max', factor=0.5, patience=5, verbose=True  # CHANGED
+        optimizer, mode='max', factor=0.5, patience=5  # CHANGED
     )  # CHANGED
 
     # CHANGED: Loss with class weights and label smoothing (Fix 2b)
